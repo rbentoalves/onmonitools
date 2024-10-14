@@ -15,48 +15,43 @@ from snowflake.snowpark.exceptions import SnowparkSessionException
 
 PROFILE = True #deactivate when deploying to SF
 
+def generate_incidents_files(GEO, analysis_start_date, backlog_source, SITE_INFO, COMPONENT_DATA):
+    status_window.info('Reading daily alarm report')
+    alarms = loadData.get_daily_alarm_report(GEO, analysis_start_date)
 
-def create_incidents_list(alarms, df_info_sunlight, site_info, component_data):
+    status_window.info('Reading backlog of data from:' + backlog_source)
+    incidents_bl, tracker_incidents_bl = loadData.get_backlog_data(backlog_source, GEO, analysis_start_date)
 
-    #add extra columns
+    status_window.info('Reading irradiance data for the day')
+    irradiance_data_day = loadData.get_irradiance_day(GEO, analysis_start_date)
+    df_info_sunlight, irradiance_file_data_notcurated = (
+        treatData.read_time_of_operation_new(irradiance_data_day, site_selection, SITE_INFO))
 
-    active_pu_list = {}
-    closed_pu_list = {}
-    active_tracker_list = {}
-    closed_tracker_list = {}
+    status_window.info('Creating new incidents list')
+    active_pu_list, active_tracker_list, closed_pu_list, closed_tracker_list = (
+        treatData.create_incidents_list(alarms, df_info_sunlight, SITE_INFO, COMPONENT_DATA))
 
-    for site in df_info_sunlight.index:
-        site_component_data = component_data.loc[(component_data['Site'] == site)]
-        site_alarms = alarms.loc[alarms['Site Name'] == site]
+    status_window.info('Adding backlog')
+    active_pu_list = treatData.complete_dataset_existing_incidents(active_pu_list, incidents_bl)
+    active_tracker_list = treatData.complete_dataset_existing_incidents(active_tracker_list,
+                                                                        tracker_incidents_bl)
 
-        sunrise = df_info_sunlight[site,'Sunrise'][0]
-        sunset = df_info_sunlight[site, 'Sunset'][0]
+    status_window.info('Creating PU incident files')
+    incidents_path = exportData.create_incidents_file(site_selection, active_pu_list, closed_pu_list,
+                                                      df_info_sunlight, irradiance_file_data_notcurated,
+                                                      analysis_start_date, GEO)
 
-        #PU Outages
-        site_pu_alarms = site_alarms[(site_alarms['Component Status'] == 'Not Producing') &
-                                          ~(site_alarms["State"] == 'Tracker target availability')]
-
-
-        #Tracker incidents
-        site_tracker_alarms = site_alarms[site_alarms['Related Component'].str.contains('Tracker|TRACKER|M -|') |
-                                    (site_alarms["State"] == 'Tracker target availability')]
-
-        active_pu_list[site] = site_pu_alarms[(site_pu_alarms['Event End Time'].isna())]
-        active_tracker_list[site] = site_tracker_alarms[(site_tracker_alarms['Event End Time'].isna())]
-
-
-        closed_pu_list[site] = site_pu_alarms[~(site_pu_alarms['Event End Time'].isna())
-                                              & ~(site_pu_alarms['Event End Time'] < sunrise)
-                                              & ~(site_pu_alarms['Event Start Time'] > sunset)]
-
-        closed_tracker_list[site] = site_tracker_alarms[~(site_tracker_alarms['Event End Time'].isna())
-                                                        & ~(site_tracker_alarms['Event End Time'] < sunrise)
-                                                        & ~(site_tracker_alarms['Event Start Time'] > sunset)]
+    status_window.info('Creating tracker incident files')
+    tracker_inc_path = exportData.create_incidents_file(site_selection, active_tracker_list, closed_tracker_list,
+                                                        df_info_sunlight, irradiance_file_data_notcurated,
+                                                        analysis_start_date, GEO, tracker=True)
 
 
+    return incidents_path, tracker_inc_path
 
-    return incidents_file, tracker_incidents_file
+def generate_dmr(incidents_path, tracker_inc_path, GEO, analysis_start_date, SITE_INFO, COMPONENT_DATA):
 
+    return
 
 
 
@@ -69,7 +64,7 @@ if __name__ == '__main__':
     GEO = 'USA'
 
     ALL_GENERAL_INFO, BUDGET_PROD, BUDGET_IRR, BUDGET_PR, COMPONENT_DATA, SITE_INFO, PRE_SELECT = (
-        loadData.read_general_info(GEO))
+        loadData.get_general_info(GEO))
     ALL_SITE_LIST = SITE_INFO.index
 
     print(ALL_SITE_LIST)
@@ -93,9 +88,15 @@ if __name__ == '__main__':
                     g1_1, g1_2 = st.columns(2)
                     with g1_1:
                         analysis_start_date = st.date_input('Start date')
-                        process_selection = st.selectbox('Process selection', ['Incidents List', 'Final Daily Report'])
+                        process_selection = st.selectbox('Process selection', ['Incidents List', 'Daily Report'])
                         backlog_source = st.selectbox('Source selection', ['Event Tracker', 'DMR'],
                                                         placeholder='Event Tracker')
+
+                        if process_selection == 'Incidents List':
+                            alarms = st.file_uploader('Choose daily alarm report')
+                        else:
+                            incidents_file = st.file_uploader('Choose incidents file')
+                            tracker_incidents_file = st.file_uploader('Choose tracker incidents file')
 
                     with g1_2:
                         site_selection = st.multiselect('Site Selection', ALL_SITE_LIST, default=PRE_SELECT)
@@ -150,37 +151,18 @@ if __name__ == '__main__':
             #alarm_report = st.file_uploader('Choose alarm report') #how slow is this?
             #alarms = pd.read_csv(alarm_report)
 
-            status_window.info('Reading daily alarm report')
-            alarms = loadData.get_daily_alarm_report(GEO, analysis_start_date)
+            #alarms = st.file_uploader()
 
-            status_window.info('Reading backlog of data from:' + backlog_source)
-            incidents_bl, tracker_incidents_bl = loadData.get_backlog_data(backlog_source, GEO, analysis_start_date)
-
-            status_window.info('Reading irradiance data for the day')
-            irradiance_data_day = loadData.get_irradiance_day(GEO, analysis_start_date)
-            df_info_sunlight, irradiance_file_data_notcurated = (
-                treatData.read_time_of_operation_new(irradiance_data_day, site_selection, SITE_INFO))
-
-            status_window.info('Creating new incidents list')
-            active_pu_list, active_tracker_list, closed_pu_list, closed_tracker_list = (
-                treatData.create_incidents_list(alarms, df_info_sunlight,SITE_INFO, COMPONENT_DATA))
-
-            status_window.info('Adding backlog')
-            active_pu_list = treatData.complete_dataset_existing_incidents(active_pu_list, incidents_bl)
-            active_tracker_list = treatData.complete_dataset_existing_incidents(active_tracker_list,
-                                                                                tracker_incidents_bl)
-
-            status_window.info('Creating PU incident files')
-            incidents_path = exportData.create_incidents_file(site_selection, active_pu_list, closed_pu_list,
-                                                              df_info_sunlight, irradiance_file_data_notcurated,
-                                                              analysis_start_date, GEO)
-
-            status_window.info('Creating tracker incident files')
-            tracker_inc_path = exportData.create_incidents_file(site_selection, active_tracker_list, closed_tracker_list,
-                                                                df_info_sunlight, irradiance_file_data_notcurated,
-                                                                analysis_start_date, GEO, tracker=True)
+            incidents_path, tracker_inc_path = generate_incidents_files(GEO, analysis_start_date, backlog_source,
+                                                                        SITE_INFO, COMPONENT_DATA)
 
             status_window.info('Success!! Incidents files created!')
+
+        if process_selection == 'Daily Report':
+            dmr_path = generate_dmr((incidents_path, tracker_inc_path, GEO, analysis_start_date,
+                                     SITE_INFO, COMPONENT_DATA))
+
+
 
             #results_table.dataframe(result, use_container_width=True)
             #results_chart.altair_chart(chart, use_container_width=True)

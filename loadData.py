@@ -8,7 +8,7 @@ from io import BytesIO
 pd.options.mode.chained_assignment = None  # default='warn'
 
 
-def read_site_info(geo: str = ""):
+def get_site_info(geo: str = ""):
     # Use a breakpoint in the code line below to debug your script.
     filename = 'General Info ' + geo + '.xlsx'
     site_info_path = glob(os.path.join(os.getcwd(), 'General Info', geo, filename))[0]
@@ -17,7 +17,7 @@ def read_site_info(geo: str = ""):
     return site_info
 
 
-def read_general_info(geo: str = ""):
+def get_general_info(geo: str = ""):
     filename = 'General Info ' + geo + '.xlsx'
     general_info_path = glob(os.path.join(os.getcwd(), 'General Info', geo, filename))[0]
     pre_select_path = glob(os.path.join(os.getcwd(), 'General Info', geo, 'site_selection.txt'))[0]
@@ -51,7 +51,6 @@ def get_daily_alarm_report(geo, analysis_start_date):
     alarms['Comments'] = ''
 
     return alarms
-
 
 def get_backlog_data(backlog_source, geo, analysis_start_date):
     if backlog_source == 'Event Tracker':
